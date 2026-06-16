@@ -3,8 +3,9 @@ import json
 import os
 from datetime import date, timedelta
 
-AHREFS_API_KEY = "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak"
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
+import os
+AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY", "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak")
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/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")
 HISTORY_FILE = "serp_history.json"
 
 KEYWORDS = {
