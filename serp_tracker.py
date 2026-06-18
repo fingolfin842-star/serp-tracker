@@ -93,8 +93,11 @@ def get_serp(keyword, country):
 def send_slack(text):
     try:
         r = requests.post(SLACK_WEBHOOK_URL, json={"text": text}, timeout=30)
+        if r.status_code != 200:
+            print(f"  ⚠️ Slack помилка {r.status_code}: {r.text[:200]}")
         return r.status_code == 200
-    except:
+    except Exception as e:
+        print(f"  ⚠️ Slack виняток: {e}")
         return False
 
 def load_history():
