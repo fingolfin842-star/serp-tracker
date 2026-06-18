@@ -24,3 +24,11 @@ jobs:
           AHREFS_API_KEY: ${{ secrets.AHREFS_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python serp_tracker.py
+
+      - name: Commit updated history
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add serp_history.json
+          git diff --staged --quiet || git commit -m "Update serp_history.json [skip ci]"
+          git push
