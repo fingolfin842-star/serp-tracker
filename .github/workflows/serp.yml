@@ -2,7 +2,7 @@ name: SERP Tracker
 
 on:
   schedule:
-    - cron: '15 8 * * *'  # щодня о 11:15 за Києвом (08:15 UTC)
+   - cron: '0 5 * * *'  # щодня о 08:00 за Києвом (05:00 UTC)
   workflow_dispatch:  # можна запустити вручну
 
 jobs:
