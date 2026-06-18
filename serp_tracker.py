@@ -5,7 +5,10 @@ from datetime import date, timedelta
 
 import os
 AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY", "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak")
-SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/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")
+import os
+AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY", "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "xoxb-684455401940-11397860869984-ds9gl5qLBo6DIfAWov0XvojV")
+SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "C0BATELBR46")
 HISTORY_FILE = "serp_history.json"
 
 KEYWORDS = {
@@ -92,10 +95,19 @@ def get_serp(keyword, country):
 
 def send_slack(text):
     try:
-        r = requests.post(SLACK_WEBHOOK_URL, json={"text": text}, timeout=30)
-        if r.status_code != 200:
-            print(f"  ⚠️ Slack помилка {r.status_code}: {r.text[:200]}")
-        return r.status_code == 200
+        r = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={
+                "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+                "Content-Type": "application/json; charset=utf-8"
+            },
+            json={"channel": SLACK_CHANNEL_ID, "text": text},
+            timeout=30
+        )
+        data = r.json()
+        if not data.get("ok"):
+            print(f"  ⚠️ Slack помилка: {data.get('error')}")
+        return data.get("ok", False)
     except Exception as e:
         print(f"  ⚠️ Slack виняток: {e}")
         return False
