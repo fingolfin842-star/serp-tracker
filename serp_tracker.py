@@ -3,10 +3,14 @@ import json
 import os
 import re
 from datetime import date, timedelta
+from google.oauth2.service_account import Credentials
+import gspread
 
-AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY", "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak")
+AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "C0BATELBR46")
+GOOGLE_SHEETS_ID = os.environ.get("GOOGLE_SHEETS_ID")
+GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
 HISTORY_FILE = "serp_history.json"
 
 CONTACT_PAGES = ["", "/contact", "/about", "/contacts", "/kontakt", "/uber-uns"]
@@ -21,6 +25,21 @@ KEYWORDS = {
 
 GEO_FLAGS = {"AU": "🇦🇺", "CA": "🇨🇦", "NZ": "🇳🇿", "DE": "🇩🇪", "AT": "🇦🇹"}
 GEO_NAMES = {"AU": "Australia", "CA": "Canada", "NZ": "New Zealand", "DE": "Germany", "AT": "Austria"}
+
+def get_sheets_client():
+    creds_json = json.loads(GOOGLE_SHEETS_CREDENTIALS)
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
+    return gspread.authorize(creds)
+
+def get_or_create_sheet(gc, today_str):
+    spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
+    try:
+        ws = spreadsheet.worksheet(today_str)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=8)
+        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact"])
+    return ws
 
 def extract_domain(url):
     if not url or not isinstance(url, str):
@@ -39,7 +58,6 @@ def get_base_url(url):
     return ""
 
 def find_contacts(site_url):
-    """Шукає контакти на головній і стандартних сторінках сайту"""
     base_url = get_base_url(site_url)
     if not base_url:
         return {}
@@ -60,23 +78,19 @@ def find_contacts(site_url):
                 continue
             html = r.text
 
-            # Email
             found_emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', html)
             for e in found_emails:
                 if not any(skip in e.lower() for skip in ["example", "sentry", "wixpress", "schema", "pixel", "jquery", "png", "jpg", "svg", "webpack"]):
                     emails.add(e.lower())
 
-            # WhatsApp
             found_wa = re.findall(r'(?:wa\.me|whatsapp\.com/send)[/\?][\+\d%A-Za-z=&]+', html)
             for wa in found_wa:
                 whatsapps.add(f"https://{wa}" if not wa.startswith("http") else wa)
 
-            # Telegram
             found_tg = re.findall(r't\.me/[A-Za-z0-9_\+]+', html)
             for tg in found_tg:
                 telegrams.add(f"https://{tg}")
 
-            # Якщо знайшли хоч щось — зупиняємось
             if emails or whatsapps or telegrams:
                 break
 
@@ -102,7 +116,6 @@ def get_serp(keyword, country):
         r = requests.get(url, headers=headers, params=params, timeout=30)
         if r.status_code == 200:
             all_positions = r.json().get("positions", [])
-
             position_count = {}
             for pos in all_positions:
                 p = pos.get("position")
@@ -111,26 +124,20 @@ def get_serp(keyword, country):
 
             result = []
             seen_positions = set()
-
             for pos in all_positions:
                 url_val = pos.get("url")
                 if not url_val or not isinstance(url_val, str) or not url_val.startswith("http"):
                     continue
-
                 p = pos.get("position")
                 is_paa = position_count.get(p, 0) > 1
-
                 if not is_paa and p in seen_positions:
                     continue
-
                 pos["is_paa"] = is_paa
                 result.append(pos)
-
                 if not is_paa:
                     seen_positions.add(p)
 
             result.sort(key=lambda x: (x.get("position") or 99, x.get("is_paa", False)))
-
             organic_count = 0
             final = []
             for pos in result:
@@ -139,7 +146,6 @@ def get_serp(keyword, country):
                 final.append(pos)
                 if organic_count >= 10:
                     break
-
             return final
         else:
             print(f"  Помилка {r.status_code} для '{keyword}' / {country}")
@@ -152,10 +158,7 @@ def send_slack(text):
     try:
         r = requests.post(
             "https://slack.com/api/chat.postMessage",
-            headers={
-                "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-                "Content-Type": "application/json; charset=utf-8"
-            },
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json; charset=utf-8"},
             json={"channel": SLACK_CHANNEL_ID, "text": text},
             timeout=30
         )
@@ -180,6 +183,11 @@ def save_history(data):
 def main():
     today_str = str(date.today())
     print(f"Запуск SERP Tracker — {today_str}")
+
+    # Підключення до Google Sheets
+    gc = get_sheets_client()
+    ws = get_or_create_sheet(gc, today_str)
+    sheets_rows = []
 
     history = load_history()
     yesterday_str = str(date.today() - timedelta(days=1))
@@ -222,6 +230,24 @@ def main():
                             "dr": pos.get("domain_rating", "")
                         })
 
+            # Додаємо рядки для Google Sheets
+            organic_counter = 0
+            for pos in positions:
+                if pos.get("is_paa"):
+                    continue
+                organic_counter += 1
+                sheets_rows.append([
+                    today_str,
+                    geo,
+                    keyword,
+                    organic_counter,
+                    pos.get("url", ""),
+                    pos.get("domain_rating", ""),
+                    "",  # Статус — заповниться пізніше
+                    ""   # Contact — заповниться пізніше
+                ])
+
+    # Відправка в Slack
     send_slack(f"📊 *SERP Report — {today_str}*\n{'─' * 40}")
 
     for geo, keywords_data in all_results.items():
@@ -240,7 +266,6 @@ def main():
                 url_val = pos.get("url", "")
                 dr = pos.get("domain_rating", "")
                 is_paa = pos.get("is_paa", False)
-
                 if is_paa:
                     geo_block += f"  ✖  {url_val}  DR:{dr}  _(People also ask)_\n"
                 else:
@@ -250,32 +275,35 @@ def main():
         send_slack(geo_block)
 
     # Нові сайти з контактами
+    contacts_map = {}
     if new_sites:
         new_block = f"\n{'─' * 40}\n🚨 *НОВІ САЙТИ СЬОГОДНІ:*\n"
         send_slack(new_block)
 
-        # Для кожного нового сайту шукаємо контакти окремо
         seen_new_domains = set()
         for s in new_sites:
             domain = s['domain']
-            if domain in seen_new_domains:
-                continue
-            seen_new_domains.add(domain)
-
             flag = GEO_FLAGS.get(s['geo'], s['geo'])
-            site_block = f"🆕 {s['url']}\n"
-            site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
 
             print(f"  Сканую контакти: {s['url']}")
-            contacts = find_contacts(s['url'])
+            if domain not in seen_new_domains:
+                seen_new_domains.add(domain)
+                contacts = find_contacts(s['url'])
+                contacts_map[domain] = contacts
+            else:
+                contacts = contacts_map.get(domain, {})
 
-            if contacts['emails']:
-                site_block += f"   📧 {', '.join(contacts['emails'])}\n"
-            if contacts['whatsapps']:
-                site_block += f"   💬 {', '.join(contacts['whatsapps'])}\n"
-            if contacts['telegrams']:
-                site_block += f"   ✈️ {', '.join(contacts['telegrams'])}\n"
-            if not any(contacts.values()):
+            all_contacts = []
+            all_contacts.extend(contacts.get("emails", []))
+            all_contacts.extend(contacts.get("whatsapps", []))
+            all_contacts.extend(contacts.get("telegrams", []))
+            contacts_str = ", ".join(all_contacts) if all_contacts else ""
+
+            site_block = f"🆕 {s['url']}\n"
+            site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
+            if contacts_str:
+                site_block += f"   📋 {contacts_str}\n"
+            else:
                 site_block += f"   _контакти не знайдені_\n"
 
             send_slack(site_block)
@@ -286,6 +314,26 @@ def main():
     if is_first_run:
         send_slack("_ℹ️ Перший запуск — звірка з попереднім днем почнеться завтра_")
 
+    # Оновлюємо статус і контакти в рядках для Sheets
+    new_urls = {s['url'] for s in new_sites}
+    for row in sheets_rows:
+        url = row[4]
+        domain = extract_domain(url)
+        if url in new_urls:
+            row[6] = "NEW"
+        contacts = contacts_map.get(domain, {})
+        all_contacts = []
+        all_contacts.extend(contacts.get("emails", []))
+        all_contacts.extend(contacts.get("whatsapps", []))
+        all_contacts.extend(contacts.get("telegrams", []))
+        row[7] = ", ".join(all_contacts)
+
+    # Записуємо в Google Sheets
+    if sheets_rows:
+        ws.append_rows(sheets_rows, value_input_option="RAW")
+        print(f"✅ Записано {len(sheets_rows)} рядків в Google Sheets")
+
+    # Зберігаємо історію
     history[today_str] = today_data
     keys_to_keep = sorted(history.keys())[-7:]
     history = {k: history[k] for k in keys_to_keep}
