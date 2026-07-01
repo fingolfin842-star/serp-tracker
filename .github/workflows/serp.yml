@@ -4,7 +4,7 @@ permissions:
   contents: write
 
 on:
-  workflow_dispatch:  # можна запустити вручну
+  workflow_dispatch:
 
 jobs:
   run:
@@ -21,7 +21,7 @@ jobs:
         run: pip install requests gspread google-auth
 
       - name: Run SERP Tracker
-env:
+        env:
           AHREFS_API_KEY: ${{ secrets.AHREFS_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
