@@ -18,13 +18,15 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests gspread google-auth
 
       - name: Run SERP Tracker
         env:
           AHREFS_API_KEY: ${{ secrets.AHREFS_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+            GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+            GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         run: python serp_tracker.py
 
       - name: Commit updated history
