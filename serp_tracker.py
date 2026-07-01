@@ -1,15 +1,15 @@
 import requests
 import json
 import os
+import re
 from datetime import date, timedelta
 
-import os
 AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY", "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak")
-import os
-AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY", "bwdex6ubgVa4tcx0-CQnItXujV0sZRLk1c_Q-tak")
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "xoxb-684455401940-11397860869984-BuKHDQXE3dScF2m4yTWoH6cP")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "C0BATELBR46")
 HISTORY_FILE = "serp_history.json"
+
+CONTACT_PAGES = ["", "/contact", "/about", "/contacts", "/kontakt", "/uber-uns"]
 
 KEYWORDS = {
     "AU": ["online casino","online casino australia","online casino australia real money","australian online casino","best online casino australia","casino online","best australian online casino","online pokies","online pokies australia","pokies online","online pokies real money","payid pokies","best online pokies australia","australian online pokies","no deposit bonus casino","free spins no deposit","no deposit free spins","online casino no deposit bonus"],
@@ -30,6 +30,65 @@ def extract_domain(url):
         return parts[2] if len(parts) > 2 else ""
     return url
 
+def get_base_url(url):
+    if not url or not isinstance(url, str):
+        return ""
+    if url.startswith("http"):
+        parts = url.split("/")
+        return f"{parts[0]}//{parts[2]}"
+    return ""
+
+def find_contacts(site_url):
+    """Шукає контакти на головній і стандартних сторінках сайту"""
+    base_url = get_base_url(site_url)
+    if not base_url:
+        return {}
+
+    emails = set()
+    whatsapps = set()
+    telegrams = set()
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    for page in CONTACT_PAGES:
+        url_to_check = f"{base_url}{page}"
+        try:
+            r = requests.get(url_to_check, headers=headers, timeout=10, allow_redirects=True)
+            if r.status_code != 200:
+                continue
+            html = r.text
+
+            # Email
+            found_emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', html)
+            for e in found_emails:
+                if not any(skip in e.lower() for skip in ["example", "sentry", "wixpress", "schema", "pixel", "jquery", "png", "jpg", "svg", "webpack"]):
+                    emails.add(e.lower())
+
+            # WhatsApp
+            found_wa = re.findall(r'(?:wa\.me|whatsapp\.com/send)[/\?][\+\d%A-Za-z=&]+', html)
+            for wa in found_wa:
+                whatsapps.add(f"https://{wa}" if not wa.startswith("http") else wa)
+
+            # Telegram
+            found_tg = re.findall(r't\.me/[A-Za-z0-9_\+]+', html)
+            for tg in found_tg:
+                telegrams.add(f"https://{tg}")
+
+            # Якщо знайшли хоч щось — зупиняємось
+            if emails or whatsapps or telegrams:
+                break
+
+        except Exception:
+            continue
+
+    return {
+        "emails": list(emails)[:3],
+        "whatsapps": list(whatsapps)[:3],
+        "telegrams": list(telegrams)[:3]
+    }
+
 def get_serp(keyword, country):
     url = "https://api.ahrefs.com/v3/serp-overview/serp-overview"
     headers = {"Authorization": f"Bearer {AHREFS_API_KEY}", "Accept": "application/json"}
@@ -44,7 +103,6 @@ def get_serp(keyword, country):
         if r.status_code == 200:
             all_positions = r.json().get("positions", [])
 
-            # Рахуємо скільки разів зустрічається кожна позиція
             position_count = {}
             for pos in all_positions:
                 p = pos.get("position")
@@ -62,7 +120,6 @@ def get_serp(keyword, country):
                 p = pos.get("position")
                 is_paa = position_count.get(p, 0) > 1
 
-                # Для звичайних результатів — пропускаємо дублі позицій
                 if not is_paa and p in seen_positions:
                     continue
 
@@ -72,10 +129,8 @@ def get_serp(keyword, country):
                 if not is_paa:
                     seen_positions.add(p)
 
-            # Сортуємо по позиції
             result.sort(key=lambda x: (x.get("position") or 99, x.get("is_paa", False)))
 
-            # Беремо топ 10 органічних + всі PAA які між ними
             organic_count = 0
             final = []
             for pos in result:
@@ -181,12 +236,9 @@ def main():
                 continue
 
             organic_counter = 0
-            current_paa_position = None
-
             for pos in positions:
                 url_val = pos.get("url", "")
                 dr = pos.get("domain_rating", "")
-                p = pos.get("position", "")
                 is_paa = pos.get("is_paa", False)
 
                 if is_paa:
@@ -197,12 +249,37 @@ def main():
 
         send_slack(geo_block)
 
+    # Нові сайти з контактами
     if new_sites:
         new_block = f"\n{'─' * 40}\n🚨 *НОВІ САЙТИ СЬОГОДНІ:*\n"
-        for s in new_sites:
-            flag = GEO_FLAGS.get(s['geo'], s['geo'])
-            new_block += f"🆕 {s['url']} — {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
         send_slack(new_block)
+
+        # Для кожного нового сайту шукаємо контакти окремо
+        seen_new_domains = set()
+        for s in new_sites:
+            domain = s['domain']
+            if domain in seen_new_domains:
+                continue
+            seen_new_domains.add(domain)
+
+            flag = GEO_FLAGS.get(s['geo'], s['geo'])
+            site_block = f"🆕 {s['url']}\n"
+            site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
+
+            print(f"  Сканую контакти: {s['url']}")
+            contacts = find_contacts(s['url'])
+
+            if contacts['emails']:
+                site_block += f"   📧 {', '.join(contacts['emails'])}\n"
+            if contacts['whatsapps']:
+                site_block += f"   💬 {', '.join(contacts['whatsapps'])}\n"
+            if contacts['telegrams']:
+                site_block += f"   ✈️ {', '.join(contacts['telegrams'])}\n"
+            if not any(contacts.values()):
+                site_block += f"   _контакти не знайдені_\n"
+
+            send_slack(site_block)
+
     elif not is_first_run:
         send_slack("✅ *Нових сайтів сьогодні немає*")
 
