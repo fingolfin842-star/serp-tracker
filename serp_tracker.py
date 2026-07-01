@@ -37,17 +37,57 @@ def get_or_create_sheet(gc, today_str):
     try:
         ws = spreadsheet.worksheet(today_str)
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=8)
-        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact"])
+        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=10)
+        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact", "Stag", "Manager"])
     return ws
+
+def load_pages_data(gc):
+    """Завантажує дані з вкладки Pages і повертає словник {domain: {stag, manager}}"""
+    try:
+        spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
+        ws = spreadsheet.worksheet("Pages")
+        rows = ws.get_all_values()
+        if not rows:
+            return {}
+
+        # Знаходимо індекси колонок
+        headers = [h.strip().lower() for h in rows[0]]
+        try:
+            url_col = headers.index("top pages")
+            stag_col = headers.index("stag")
+            manager_col = headers.index("manager")
+        except ValueError as e:
+            print(f"  ⚠️ Колонка не знайдена в Pages: {e}")
+            return {}
+
+        pages_map = {}
+        for row in rows[1:]:
+            if len(row) <= max(url_col, stag_col, manager_col):
+                continue
+            page_url = row[url_col].strip()
+            stag = row[stag_col].strip()
+            manager = row[manager_col].strip()
+            if page_url:
+                domain = extract_domain(page_url)
+                if domain:
+                    pages_map[domain] = {"stag": stag, "manager": manager}
+
+        print(f"✅ Завантажено {len(pages_map)} доменів з вкладки Pages")
+        return pages_map
+
+    except Exception as e:
+        print(f"  ⚠️ Помилка завантаження Pages: {e}")
+        return {}
 
 def extract_domain(url):
     if not url or not isinstance(url, str):
         return ""
+    url = url.strip()
     if url.startswith("http"):
         parts = url.split("/")
-        return parts[2] if len(parts) > 2 else ""
-    return url
+        domain = parts[2] if len(parts) > 2 else ""
+        return domain.replace("www.", "")
+    return url.replace("www.", "")
 
 def get_base_url(url):
     if not url or not isinstance(url, str):
@@ -187,7 +227,9 @@ def main():
     # Підключення до Google Sheets
     gc = get_sheets_client()
     ws = get_or_create_sheet(gc, today_str)
-    sheets_rows = []
+
+    # Завантажуємо дані з вкладки Pages
+    pages_map = load_pages_data(gc)
 
     history = load_history()
     yesterday_str = str(date.today() - timedelta(days=1))
@@ -197,6 +239,7 @@ def main():
     today_data = {}
     all_results = {}
     new_sites = []
+    sheets_rows = []
 
     for geo, keywords in KEYWORDS.items():
         all_results[geo] = {}
@@ -230,92 +273,42 @@ def main():
                             "dr": pos.get("domain_rating", "")
                         })
 
-            # Додаємо рядки для Google Sheets
+            # Рядки для Google Sheets
             organic_counter = 0
             for pos in positions:
                 if pos.get("is_paa"):
                     continue
                 organic_counter += 1
+                url_val = pos.get("url", "")
+                domain = extract_domain(url_val)
+                page_info = pages_map.get(domain, {})
                 sheets_rows.append([
                     today_str,
                     geo,
                     keyword,
                     organic_counter,
-                    pos.get("url", ""),
+                    url_val,
                     pos.get("domain_rating", ""),
-                    "",  # Статус — заповниться пізніше
-                    ""   # Contact — заповниться пізніше
+                    "",  # Статус
+                    "",  # Contact
+                    page_info.get("stag", ""),
+                    page_info.get("manager", "")
                 ])
 
-    # Відправка в Slack
-    send_slack(f"📊 *SERP Report — {today_str}*\n{'─' * 40}")
-
-    for geo, keywords_data in all_results.items():
-        flag = GEO_FLAGS.get(geo, "")
-        geo_name = GEO_NAMES.get(geo, geo)
-        geo_block = f"\n*{flag} {geo_name}*\n{'─' * 40}\n"
-
-        for keyword, positions in keywords_data.items():
-            geo_block += f"\n*{keyword} [{geo}]*\n"
-            if not positions:
-                geo_block += "  _немає даних_\n"
-                continue
-
-            organic_counter = 0
-            for pos in positions:
-                url_val = pos.get("url", "")
-                dr = pos.get("domain_rating", "")
-                is_paa = pos.get("is_paa", False)
-                if is_paa:
-                    geo_block += f"  ✖  {url_val}  DR:{dr}  _(People also ask)_\n"
-                else:
-                    organic_counter += 1
-                    geo_block += f"  #{organic_counter}  {url_val}  DR:{dr}\n"
-
-        send_slack(geo_block)
-
-    # Нові сайти з контактами
+    # Збираємо контакти для нових сайтів
     contacts_map = {}
-    if new_sites:
-        new_block = f"\n{'─' * 40}\n🚨 *НОВІ САЙТИ СЬОГОДНІ:*\n"
-        send_slack(new_block)
+    new_urls = {s['url'] for s in new_sites}
 
+    if new_sites:
         seen_new_domains = set()
         for s in new_sites:
             domain = s['domain']
-            flag = GEO_FLAGS.get(s['geo'], s['geo'])
-
-            print(f"  Сканую контакти: {s['url']}")
             if domain not in seen_new_domains:
                 seen_new_domains.add(domain)
-                contacts = find_contacts(s['url'])
-                contacts_map[domain] = contacts
-            else:
-                contacts = contacts_map.get(domain, {})
+                print(f"  Сканую контакти: {s['url']}")
+                contacts_map[domain] = find_contacts(s['url'])
 
-            all_contacts = []
-            all_contacts.extend(contacts.get("emails", []))
-            all_contacts.extend(contacts.get("whatsapps", []))
-            all_contacts.extend(contacts.get("telegrams", []))
-            contacts_str = ", ".join(all_contacts) if all_contacts else ""
-
-            site_block = f"🆕 {s['url']}\n"
-            site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
-            if contacts_str:
-                site_block += f"   📋 {contacts_str}\n"
-            else:
-                site_block += f"   _контакти не знайдені_\n"
-
-            send_slack(site_block)
-
-    elif not is_first_run:
-        send_slack("✅ *Нових сайтів сьогодні немає*")
-
-    if is_first_run:
-        send_slack("_ℹ️ Перший запуск — звірка з попереднім днем почнеться завтра_")
-
-    # Оновлюємо статус і контакти в рядках для Sheets
-    new_urls = {s['url'] for s in new_sites}
+    # Оновлюємо статус і контакти в рядках Sheets
     for row in sheets_rows:
         url = row[4]
         domain = extract_domain(url)
@@ -332,6 +325,46 @@ def main():
     if sheets_rows:
         ws.append_rows(sheets_rows, value_input_option="RAW")
         print(f"✅ Записано {len(sheets_rows)} рядків в Google Sheets")
+
+    # Відправка в Slack — тільки нові сайти
+    if new_sites:
+        new_block = f"📊 *SERP Report — {today_str}*\n{'─' * 40}\n🚨 *НОВІ САЙТИ СЬОГОДНІ:*\n"
+        send_slack(new_block)
+
+        seen_slack_domains = set()
+        for s in new_sites:
+            domain = s['domain']
+            flag = GEO_FLAGS.get(s['geo'], s['geo'])
+            contacts = contacts_map.get(domain, {})
+
+            all_contacts = []
+            all_contacts.extend(contacts.get("emails", []))
+            all_contacts.extend(contacts.get("whatsapps", []))
+            all_contacts.extend(contacts.get("telegrams", []))
+            contacts_str = ", ".join(all_contacts) if all_contacts else ""
+
+            page_info = pages_map.get(domain, {})
+            stag = page_info.get("stag", "")
+            manager = page_info.get("manager", "")
+
+            site_block = f"🆕 {s['url']}\n"
+            site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
+            if stag:
+                site_block += f"   🏷 Stag: {stag}\n"
+            if manager:
+                site_block += f"   👤 Manager: {manager}\n"
+            if contacts_str:
+                site_block += f"   📋 {contacts_str}\n"
+            else:
+                site_block += f"   _контакти не знайдені_\n"
+
+            send_slack(site_block)
+
+    elif not is_first_run:
+        send_slack(f"📊 *SERP Report — {today_str}*\n✅ *Нових сайтів сьогодні немає*")
+
+    if is_first_run:
+        send_slack(f"📊 *SERP Report — {today_str}*\n_ℹ️ Перший запуск — звірка з попереднім днем почнеться завтра_")
 
     # Зберігаємо історію
     history[today_str] = today_data
