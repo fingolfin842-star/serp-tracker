@@ -38,7 +38,7 @@ def get_or_create_sheet(gc, today_str):
         ws = spreadsheet.worksheet(today_str)
     except gspread.exceptions.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=10)
-        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact", "Stag", "Manager"])
+        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact", "Stag", "Name", "Manager"])
     return ws
 
 def load_pages_data(gc):
@@ -55,6 +55,7 @@ def load_pages_data(gc):
         try:
             url_col = headers.index("top pages")
             stag_col = headers.index("stag")
+            name_col = headers.index("name")
             manager_col = headers.index("manager")
         except ValueError as e:
             print(f"  ⚠️ Колонка не знайдена в Pages: {e}")
@@ -62,15 +63,16 @@ def load_pages_data(gc):
 
         pages_map = {}
         for row in rows[1:]:
-            if len(row) <= max(url_col, stag_col, manager_col):
+            if len(row) <= max(url_col, stag_col, name_col, manager_col):
                 continue
             page_url = row[url_col].strip()
             stag = row[stag_col].strip()
+            name = row[name_col].strip()
             manager = row[manager_col].strip()
             if page_url:
                 domain = extract_domain(page_url)
                 if domain:
-                    pages_map[domain] = {"stag": stag, "manager": manager}
+                    pages_map[domain] = {"stag": stag, "name": name, "manager": manager}
 
         print(f"✅ Завантажено {len(pages_map)} доменів з вкладки Pages")
         return pages_map
@@ -292,6 +294,7 @@ def main():
                     "",  # Статус
                     "",  # Contact
                     page_info.get("stag", ""),
+                    page_info.get("name", ""),
                     page_info.get("manager", "")
                 ])
 
@@ -349,8 +352,11 @@ def main():
 
             site_block = f"🆕 {s['url']}\n"
             site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
+            name = page_info.get("name", "")
             if stag:
                 site_block += f"   🏷 Stag: {stag}\n"
+            if name:
+                site_block += f"   📝 Name: {name}\n"
             if manager:
                 site_block += f"   👤 Manager: {manager}\n"
             if contacts_str:
