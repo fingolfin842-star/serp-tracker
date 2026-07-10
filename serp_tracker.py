@@ -5,6 +5,7 @@ import re
 from datetime import date, timedelta
 from google.oauth2.service_account import Credentials
 import gspread
+import time
 
 AHREFS_API_KEY = os.environ.get("AHREFS_API_KEY")
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
@@ -15,6 +16,18 @@ HISTORY_FILE = "serp_history.json"
 
 CONTACT_PAGES = ["", "/contact", "/about", "/contacts", "/kontakt", "/uber-uns"]
 
+# Сайти які позначаємо в колонці Name
+NAMED_SITES = {
+    "youtube.com": "YouTube",
+    "play.google.com": "Google Play",
+    "acma.gov.au": "ACMA",
+    "wikipedia.org": "Wikipedia",
+    "facebook.com": "Facebook",
+}
+
+# Ключові слова в URL для визначення рев'юшників
+REVIEW_KEYWORDS = ["/review", "/reviews", "/best", "/top", "/ranking", "/ratings"]
+
 KEYWORDS = {
     "AU": ["online casino","online casino australia","online casino australia real money","australian online casino","best online casino australia","casino online","best australian online casino","online pokies","online pokies australia","pokies online","online pokies real money","payid pokies","best online pokies australia","australian online pokies","no deposit bonus casino","free spins no deposit","no deposit free spins","online casino no deposit bonus"],
     "CA": ["online casino","online casino canada","casino en ligne","1$ deposit casino","casino bonus","best casino online","best online casino canada","no deposit bonus casino","no deposit bonus casino canada","casino no deposit bonus","no deposit casino","casino bonus sans dépôt","casino rewards bonus sans dépôt","best online casino","$5 minimum deposit casino canada"],
@@ -24,7 +37,6 @@ KEYWORDS = {
 }
 
 GEO_FLAGS = {"AU": "🇦🇺", "CA": "🇨🇦", "NZ": "🇳🇿", "DE": "🇩🇪", "AT": "🇦🇹"}
-GEO_NAMES = {"AU": "Australia", "CA": "Canada", "NZ": "New Zealand", "DE": "Germany", "AT": "Austria"}
 
 def get_sheets_client():
     creds_json = json.loads(GOOGLE_SHEETS_CREDENTIALS)
@@ -37,12 +49,12 @@ def get_or_create_sheet(gc, today_str):
     try:
         ws = spreadsheet.worksheet(today_str)
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=10)
+        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=11)
         ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact", "Stag", "Name", "Manager"])
     return ws
 
 def load_pages_data(gc):
-    """Завантажує дані з вкладки Pages і повертає словник {domain: {stag, manager}}"""
+    """Завантажує дані з вкладки Pages"""
     try:
         spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
         ws = spreadsheet.worksheet("Pages")
@@ -50,7 +62,6 @@ def load_pages_data(gc):
         if not rows:
             return {}
 
-        # Знаходимо індекси колонок
         headers = [h.strip().lower() for h in rows[0]]
         try:
             url_col = headers.index("top pages")
@@ -76,10 +87,81 @@ def load_pages_data(gc):
 
         print(f"✅ Завантажено {len(pages_map)} доменів з вкладки Pages")
         return pages_map
-
     except Exception as e:
         print(f"  ⚠️ Помилка завантаження Pages: {e}")
         return {}
+
+def load_manager_history(gc, today_str):
+    """Завантажує історію менеджерів з попередніх вкладок"""
+    try:
+        spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
+        all_sheets = spreadsheet.worksheets()
+        manager_map = {}  # {domain: {stag, name, manager}}
+
+        # Сортуємо вкладки за датою (від найстарішої до найновішої)
+        date_sheets = []
+        for ws in all_sheets:
+            title = ws.title
+            if title == today_str or title == "Pages":
+                continue
+            try:
+                date.fromisoformat(title)
+                date_sheets.append((title, ws))
+            except ValueError:
+                continue
+
+        date_sheets.sort(key=lambda x: x[0])
+
+        for title, ws in date_sheets:
+            try:
+                rows = ws.get_all_values()
+                if not rows or len(rows) < 2:
+                    continue
+
+                headers = [h.strip().lower() for h in rows[0]]
+                try:
+                    url_col = headers.index("url")
+                    manager_col = headers.index("manager")
+                    stag_col = headers.index("stag")
+                    name_col = headers.index("name")
+                    status_col = headers.index("статус")
+                except ValueError:
+                    continue
+
+                for row in rows[1:]:
+                    if len(row) <= max(url_col, manager_col, stag_col, name_col, status_col):
+                        continue
+                    status = row[status_col].strip()
+                    manager = row[manager_col].strip()
+                    if status == "NEW" and manager:
+                        url_val = row[url_col].strip()
+                        domain = extract_domain(url_val)
+                        if domain:
+                            manager_map[domain] = {
+                                "stag": row[stag_col].strip(),
+                                "name": row[name_col].strip(),
+                                "manager": manager
+                            }
+            except Exception:
+                continue
+
+        print(f"✅ Завантажено {len(manager_map)} доменів з історії вкладок")
+        return manager_map
+    except Exception as e:
+        print(f"  ⚠️ Помилка завантаження історії: {e}")
+        return {}
+
+def get_site_name(domain):
+    """Повертає назву для відомих сайтів"""
+    for known_domain, name in NAMED_SITES.items():
+        if known_domain in domain:
+            return name
+    return ""
+
+def is_review_site(url):
+    """Перевіряє чи є сайт рев'юшником по URL"""
+    url_lower = url.lower()
+    return any(kw in url_lower for kw in REVIEW_KEYWORDS)
 
 def extract_domain(url):
     if not url or not isinstance(url, str):
@@ -135,7 +217,6 @@ def find_contacts(site_url):
 
             if emails or whatsapps or telegrams:
                 break
-
         except Exception:
             continue
 
@@ -222,16 +303,40 @@ def save_history(data):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def apply_green_formatting(ws, row_indices, spreadsheet):
+    """Підсвічує рядки рев'юшників зеленим"""
+    if not row_indices:
+        return
+    green = {"backgroundColor": {"red": 0.56, "green": 0.93, "blue": 0.56}}
+    requests_batch = []
+    for row_idx in row_indices:
+        requests_batch.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": row_idx,
+                    "endRowIndex": row_idx + 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": 11
+                },
+                "cell": {"userEnteredFormat": green},
+                "fields": "userEnteredFormat.backgroundColor"
+            }
+        })
+    if requests_batch:
+        spreadsheet.batch_update({"requests": requests_batch})
+
 def main():
     today_str = str(date.today())
     print(f"Запуск SERP Tracker — {today_str}")
 
-    # Підключення до Google Sheets
     gc = get_sheets_client()
+    spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
     ws = get_or_create_sheet(gc, today_str)
 
-    # Завантажуємо дані з вкладки Pages
+    # Завантажуємо дані
     pages_map = load_pages_data(gc)
+    manager_history = load_manager_history(gc, today_str)
 
     history = load_history()
     yesterday_str = str(date.today() - timedelta(days=1))
@@ -249,6 +354,7 @@ def main():
             print(f"  {geo} | {keyword}")
             positions = get_serp(keyword, geo)
             all_results[geo][keyword] = positions
+            time.sleep(2)
 
             urls_today = set()
             for pos in positions:
@@ -283,7 +389,20 @@ def main():
                 organic_counter += 1
                 url_val = pos.get("url", "")
                 domain = extract_domain(url_val)
-                page_info = pages_map.get(domain, {})
+
+                # Визначаємо info: пріоритет Pages → історія вкладок
+                if domain in pages_map:
+                    page_info = pages_map[domain]
+                elif domain in manager_history:
+                    page_info = manager_history[domain]
+                else:
+                    page_info = {}
+
+                # Визначаємо Name
+                site_name = get_site_name(domain)
+                if not site_name:
+                    site_name = page_info.get("name", "")
+
                 sheets_rows.append([
                     today_str,
                     geo,
@@ -294,7 +413,7 @@ def main():
                     "",  # Статус
                     "",  # Contact
                     page_info.get("stag", ""),
-                    page_info.get("name", ""),
+                    site_name,
                     page_info.get("manager", "")
                 ])
 
@@ -326,15 +445,27 @@ def main():
 
     # Записуємо в Google Sheets
     if sheets_rows:
+        # Знаходимо поточну кількість рядків для визначення індексів
+        existing_rows = len(ws.get_all_values())
         ws.append_rows(sheets_rows, value_input_option="RAW")
         print(f"✅ Записано {len(sheets_rows)} рядків в Google Sheets")
+
+        # Підсвічуємо рев'юшників зеленим
+        review_row_indices = []
+        for i, row in enumerate(sheets_rows):
+            url = row[4]
+            if is_review_site(url):
+                review_row_indices.append(existing_rows + i)
+
+        if review_row_indices:
+            apply_green_formatting(ws, review_row_indices, spreadsheet)
+            print(f"✅ Підсвічено {len(review_row_indices)} рев'юшників зеленим")
 
     # Відправка в Slack — тільки нові сайти
     if new_sites:
         new_block = f"📊 *SERP Report — {today_str}*\n{'─' * 40}\n🚨 *НОВІ САЙТИ СЬОГОДНІ:*\n"
         send_slack(new_block)
 
-        seen_slack_domains = set()
         for s in new_sites:
             domain = s['domain']
             flag = GEO_FLAGS.get(s['geo'], s['geo'])
@@ -346,17 +477,27 @@ def main():
             all_contacts.extend(contacts.get("telegrams", []))
             contacts_str = ", ".join(all_contacts) if all_contacts else ""
 
-            page_info = pages_map.get(domain, {})
+            # Визначаємо info: пріоритет Pages → історія
+            if domain in pages_map:
+                page_info = pages_map[domain]
+            elif domain in manager_history:
+                page_info = manager_history[domain]
+            else:
+                page_info = {}
+
+            site_name = get_site_name(domain)
+            if not site_name:
+                site_name = page_info.get("name", "")
+
             stag = page_info.get("stag", "")
             manager = page_info.get("manager", "")
 
             site_block = f"🆕 {s['url']}\n"
             site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
-            name = page_info.get("name", "")
+            if site_name:
+                site_block += f"   📝 {site_name}\n"
             if stag:
                 site_block += f"   🏷 Stag: {stag}\n"
-            if name:
-                site_block += f"   📝 Name: {name}\n"
             if manager:
                 site_block += f"   👤 Manager: {manager}\n"
             if contacts_str:
