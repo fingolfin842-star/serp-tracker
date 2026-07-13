@@ -68,22 +68,24 @@ def load_pages_data(gc):
             stag_col = headers.index("stag")
             name_col = headers.index("name")
             manager_col = headers.index("manager")
+            type_col = headers.index("type")
         except ValueError as e:
             print(f"  ⚠️ Колонка не знайдена в Pages: {e}")
             return {}
 
         pages_map = {}
         for row in rows[1:]:
-            if len(row) <= max(url_col, stag_col, name_col, manager_col):
+            if len(row) <= max(url_col, stag_col, name_col, manager_col, type_col):
                 continue
             page_url = row[url_col].strip()
             stag = row[stag_col].strip()
             name = row[name_col].strip()
             manager = row[manager_col].strip()
+            page_type = row[type_col].strip().lower()
             if page_url:
                 domain = extract_domain(page_url)
                 if domain:
-                    pages_map[domain] = {"stag": stag, "name": name, "manager": manager}
+                    pages_map[domain] = {"stag": stag, "name": name, "manager": manager, "type": page_type}
 
         print(f"✅ Завантажено {len(pages_map)} доменів з вкладки Pages")
         return pages_map
@@ -371,15 +373,21 @@ def main():
                     if pos.get("is_paa"):
                         continue
                     url_val = pos.get("url", "")
-                    if url_val and url_val not in prev_urls:
-                        new_sites.append({
-                            "geo": geo,
-                            "keyword": keyword,
-                            "position": pos.get("position", ""),
-                            "url": url_val,
-                            "domain": extract_domain(url_val),
-                            "dr": pos.get("domain_rating", "")
-                        })
+                    if not url_val or url_val in prev_urls:
+                        continue
+                    domain = extract_domain(url_val)
+                    # Пропускаємо casino brands
+                    page_info = pages_map.get(domain, {})
+                    if page_info.get("type", "") == "casino brand":
+                        continue
+                    new_sites.append({
+                        "geo": geo,
+                        "keyword": keyword,
+                        "position": pos.get("position", ""),
+                        "url": url_val,
+                        "domain": domain,
+                        "dr": pos.get("domain_rating", "")
+                    })
 
             # Рядки для Google Sheets
             organic_counter = 0
