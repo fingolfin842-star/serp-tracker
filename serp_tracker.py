@@ -50,7 +50,7 @@ def get_or_create_sheet(gc, today_str):
         ws = spreadsheet.worksheet(today_str)
     except gspread.exceptions.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=11)
-        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Статус", "Contact", "Stag", "Name", "Manager"])
+        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Traffic", "Статус", "Contact", "Stag", "Name", "Manager", "Comment"])
     return ws
 
 def load_pages_data(gc):
@@ -235,7 +235,7 @@ def get_serp(keyword, country):
         "keyword": keyword,
         "country": country.lower(),
         "top_positions": 30,
-        "select": "url,position,domain_rating,page_type"
+        "select": "url,position,domain_rating,page_type,traffic"
     }
     try:
         r = requests.get(url, headers=headers, params=params, timeout=30)
@@ -319,7 +319,7 @@ def apply_green_formatting(ws, row_indices, spreadsheet):
                     "startRowIndex": row_idx,
                     "endRowIndex": row_idx + 1,
                     "startColumnIndex": 0,
-                    "endColumnIndex": 11
+                    "endColumnIndex": 13
                 },
                 "cell": {"userEnteredFormat": green},
                 "fields": "userEnteredFormat.backgroundColor"
@@ -418,11 +418,13 @@ def main():
                     organic_counter,
                     url_val,
                     pos.get("domain_rating", ""),
+                    pos.get("traffic", ""),
                     "",  # Статус
                     "",  # Contact
                     page_info.get("stag", ""),
                     site_name,
-                    page_info.get("manager", "")
+                    page_info.get("manager", ""),
+                    ""   # Comment
                 ])
 
     # Збираємо контакти для нових сайтів
@@ -443,13 +445,13 @@ def main():
         url = row[4]
         domain = extract_domain(url)
         if url in new_urls:
-            row[6] = "NEW"
+            row[7] = "NEW"
         contacts = contacts_map.get(domain, {})
         all_contacts = []
         all_contacts.extend(contacts.get("emails", []))
         all_contacts.extend(contacts.get("whatsapps", []))
         all_contacts.extend(contacts.get("telegrams", []))
-        row[7] = ", ".join(all_contacts)
+        row[8] = ", ".join(all_contacts)
 
     # Записуємо в Google Sheets
     if sheets_rows:
