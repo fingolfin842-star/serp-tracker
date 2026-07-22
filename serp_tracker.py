@@ -591,8 +591,14 @@ def main():
             if manager:
                 site_block += f"   👤 Manager: {manager}\n"
             if found_friends:
+                seen_managers = set()
                 for fb in found_friends:
-                    site_block += f"   🤝 Бренд: {fb['brand']} | Manager 7bit: {fb['manager']}\n"
+                    manager_7bit = fb['manager']
+                    brand_line = f"   🤝 Бренд: {fb['brand']}"
+                    if manager_7bit not in seen_managers:
+                        brand_line += f" | Manager 7bit: {manager_7bit}"
+                        seen_managers.add(manager_7bit)
+                    site_block += brand_line + "\n"
             if contacts_str:
                 site_block += f"   📋 {contacts_str}\n"
             else:
