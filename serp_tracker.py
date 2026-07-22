@@ -239,7 +239,11 @@ def find_friend_brands(page_url, base_url, friends):
 
         for friend in friends:
             brand = friend["brand"]
-            if brand.lower() in visible_text:
+            brand_norm = brand.lower().strip()
+            if not brand_norm:
+                continue
+            pattern = r'\b' + re.escape(brand_norm) + r'\b'
+            if re.search(pattern, visible_text):
                 if brand not in found_brands:
                     found_brands[brand] = friend["manager"]
 
