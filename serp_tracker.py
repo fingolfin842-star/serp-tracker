@@ -29,13 +29,6 @@ NAMED_SITES = {
 # Ключові слова в URL для визначення рев'юшників
 REVIEW_KEYWORDS = ["/review", "/reviews", "/best", "/top", "/ranking", "/ratings"]
 
-# Ключові слова CTA-кнопок, які зазвичай стоять біля назви бренду в топ-лістах
-CTA_PATTERNS = [
-    "visit site", "visit casino", "play now", "play here",
-    "claim bonus", "claim offer", "get bonus", "sign up",
-    "join now", "play at", "go to casino", "check it out"
-]
-
 KEYWORDS = {
     "AU": ["online casino","online casino australia","online casino australia real money","australian online casino","best online casino australia","casino online","best australian online casino","online pokies","online pokies australia","pokies online","online pokies real money","payid pokies","best online pokies australia","australian online pokies","no deposit bonus casino","free spins no deposit","no deposit free spins","online casino no deposit bonus"],
     "CA": ["online casino","online casino canada","casino en ligne","1$ deposit casino","casino bonus","best casino online","best online casino canada","no deposit bonus casino","no deposit bonus casino canada","casino no deposit bonus","no deposit casino","casino bonus sans dépôt","casino rewards bonus sans dépôt","best online casino","$5 minimum deposit casino canada"],
@@ -63,11 +56,11 @@ def get_or_create_sheet(gc, today_str):
     try:
         ws = spreadsheet.worksheet(today_str)
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=16)
+        ws = spreadsheet.add_worksheet(title=today_str, rows=5000, cols=15)
         ws.append_row([
             "Дата", "ГЕО", "Ключ", "Позиція", "URL", "DR", "Traffic", "Статус",
             "Contact", "Stag", "Name", "Manager", "Знайомий бренд", "Manager 7bit",
-            "Comment", "Топ бренди"
+            "Comment"
         ])
     return ws
 
@@ -253,73 +246,6 @@ def find_friend_brands(page_url, base_url, friends):
     return [{"brand": b, "manager": m} for b, m in found_brands.items()]
 
 
-def _clean_brand_text(text):
-    if not text:
-        return None
-    text = re.sub(r'(?i)\s*(logo|icon)\s*$', '', text).strip()
-    text = re.sub(r'\s+', ' ', text)
-    if not (2 <= len(text) <= 40):
-        return None
-    # відсікаємо явно не-бренд-текст (номер, зірочки, тощо)
-    if not re.search(r'[A-Za-zА-Яа-яЇїІіЄєҐґ]', text):
-        return None
-    return text
-
-
-def _find_brand_name_near(cta_tag):
-    """Піднімається по батьківських блоках від CTA-кнопки і шукає
-    найближчий заголовок або alt-текст логотипу — це і є назва бренду."""
-    node = cta_tag
-    for _ in range(6):
-        if node is None or node.parent is None:
-            break
-        node = node.parent
-
-        heading = node.find(["h1", "h2", "h3", "h4", "h5", "strong", "b"])
-        if heading:
-            candidate = _clean_brand_text(heading.get_text(strip=True))
-            if candidate:
-                return candidate
-
-        img = node.find("img", alt=True)
-        if img:
-            candidate = _clean_brand_text(img.get("alt", ""))
-            if candidate:
-                return candidate
-
-    return None
-
-
-def extract_top_brands_list(url, max_brands=10):
-    """
-    Визначає, чи є на сторінці топ-ліст брендів (структура: назва/лого бренду
-    поруч із CTA-кнопкою типу "Visit site"), і повертає список назв брендів
-    у порядку появи на сторінці (без дублів), обрізаний до max_brands.
-    Якщо структуру топ-ліста не знайдено — повертає [].
-    """
-    soup, _ = fetch_visible_text(url)
-    if soup is None:
-        return []
-
-    cta_elements = []
-    for tag in soup.find_all(["a", "button"]):
-        text = tag.get_text(strip=True).lower()
-        if any(pattern in text for pattern in CTA_PATTERNS):
-            cta_elements.append(tag)
-
-    brands = []
-    seen = set()
-    for cta in cta_elements:
-        brand_name = _find_brand_name_near(cta)
-        if brand_name and brand_name.lower() not in seen:
-            seen.add(brand_name.lower())
-            brands.append(brand_name)
-        if len(brands) >= max_brands:
-            break
-
-    return brands
-
-
 def get_site_name(domain):
     """Повертає назву для відомих сайтів"""
     for known_domain, name in NAMED_SITES.items():
@@ -491,7 +417,7 @@ def apply_green_formatting(ws, row_indices, spreadsheet):
                     "startRowIndex": row_idx,
                     "endRowIndex": row_idx + 1,
                     "startColumnIndex": 0,
-                    "endColumnIndex": 16
+                    "endColumnIndex": 15
                 },
                 "cell": {"userEnteredFormat": green},
                 "fields": "userEnteredFormat.backgroundColor"
@@ -598,13 +524,11 @@ def main():
                     "",  # Знайомий бренд
                     "",  # Manager 7bit
                     "",  # Comment
-                    ""   # Топ бренди
                 ])
 
-    # Збираємо контакти, бренди друзів і топ-ліст брендів для НОВИХ сайтів
+    # Збираємо контакти і бренди друзів для НОВИХ сайтів
     contacts_map = {}
     friends_map = {}      # {url: [{brand, manager}]}
-    top_brands_map = {}   # {url: [brand, brand, ...]}
     new_urls = {s['url'] for s in new_sites}
 
     if new_sites:
@@ -621,10 +545,7 @@ def main():
                 print(f"  Сканую бренди друзів: {url_val}")
                 friends_map[url_val] = find_friend_brands(url_val, base, friends_list)
 
-            print(f"  Шукаю топ-ліст брендів: {url_val}")
-            top_brands_map[url_val] = extract_top_brands_list(url_val, max_brands=10)
-
-    # Оновлюємо статус, контакти, бренди друзів і топ-ліст в рядках Sheets
+    # Оновлюємо статус, контакти і бренди друзів в рядках Sheets
     for row in sheets_rows:
         url = row[4]
         domain = extract_domain(url)
@@ -634,11 +555,9 @@ def main():
             found = friends_map.get(url, [])
             if found:
                 row[12] = ", ".join(f["brand"] for f in found)
-                row[13] = ", ".join(f["manager"] for f in found)
-
-            top_brands = top_brands_map.get(url, [])
-            if top_brands:
-                row[15] = ", ".join(top_brands)
+                # унікальні менеджери, без дублювання, порядок появи збережено
+                unique_managers = list(dict.fromkeys(f["manager"] for f in found if f["manager"]))
+                row[13] = ", ".join(unique_managers)
 
         contacts = contacts_map.get(domain, {})
         all_contacts = []
@@ -694,7 +613,6 @@ def main():
             manager = page_info.get("manager", "")
 
             found_friends = friends_map.get(s['url'], [])
-            top_brands = top_brands_map.get(s['url'], [])
 
             site_block = f"🆕 {s['url']}\n"
             site_block += f"   {flag} {s['geo']} | {s['keyword']} | позиція #{s['position']} | DR:{s['dr']}\n"
@@ -713,8 +631,6 @@ def main():
                         brand_line += f" | Manager 7bit: {manager_7bit}"
                         seen_managers.add(manager_7bit)
                     site_block += brand_line + "\n"
-            if top_brands:
-                site_block += f"   📋 Топ бренди: {', '.join(top_brands)}\n"
             if contacts_str:
                 site_block += f"   📋 {contacts_str}\n"
             else:
