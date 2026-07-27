@@ -445,9 +445,15 @@ def main():
     friends_list = load_friends_data(gc)
 
     history = load_history()
-    yesterday_str = str(date.today() - timedelta(days=1))
-    yesterday_data = history.get(yesterday_str, {})
-    is_first_run = len(yesterday_data) == 0
+    previous_dates = sorted(d for d in history.keys() if d < today_str)
+    if previous_dates:
+        previous_str = previous_dates[-1]
+        yesterday_data = history[previous_str]
+        is_first_run = False
+    else:
+        previous_str = None
+        yesterday_data = {}
+        is_first_run = True
 
     today_data = {}
     all_results = {}
