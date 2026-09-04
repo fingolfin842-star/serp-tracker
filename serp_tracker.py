@@ -26,18 +26,25 @@ NAMED_SITES = {
     "facebook.com": "Facebook",
 }
 
-# Ключові слова в URL для визначення рев'юшників
-REVIEW_KEYWORDS = ["/review", "/reviews", "/best", "/top", "/ranking", "/ratings"]
-
 KEYWORDS = {
     "AU": ["online casino","online casino australia","online casino australia real money","australian online casino","best online casino australia","casino online","best australian online casino","online pokies","online pokies australia","pokies online","online pokies real money","payid pokies","best online pokies australia","australian online pokies","no deposit bonus casino","free spins no deposit","no deposit free spins","online casino no deposit bonus"],
     "CA": ["online casino","online casino canada","casino en ligne","1$ deposit casino","casino bonus","best casino online","best online casino canada","no deposit bonus casino","no deposit bonus casino canada","casino no deposit bonus","no deposit casino","casino bonus sans dépôt","casino rewards bonus sans dépôt","best online casino","$5 minimum deposit casino canada"],
     "NZ": ["$1 deposit casino","$1 deposit casino nz","1 dollar deposit casino","online casino nz","online casino","best online casino nz","nz online casino","best online casino","casino online","no deposit bonus casino","deposit $1 get $20 nz","1 deposit casino"],
     "DE": ["online casino","online casino deutschland","casino online","bestes online casino","beste online casino","casino bonus ohne einzahlung","10 euro bonus ohne einzahlung casino","online casino kostenlos","online casino bonus ohne einzahlung","crypto casino","bitcoin casino","online casino ohne limit"],
-    "AT": ["online casino","online casino österreich","casino online","casino austria","casino online österreich","casino bonus ohne einzahlung","online casino bonus ohne einzahlung","bitcoin casino","crypto casino"]
+    "AT": ["online casino","online casino österreich","casino online","casino austria","casino online österreich","casino bonus ohne einzahlung","online casino bonus ohne einzahlung","bitcoin casino","crypto casino"],
+    "IT": ["casino non aams","casino online non aams","casino online","bonus senza deposito casino","bonus casino senza deposito","migliori casino online","online casino","roulette casino","casino con bonus senza deposito","casino online italia","siti non aams","casino venezia online"],
+    "IE": ["online casino","casino online","casino online ireland","no deposit bonus casino","free spins no deposit","best online casino","bitcoin casino","crypto casino"],
+    "CH": ["online casino","casino online","bestes online casino","beste online casino","casino bonus ohne einzahlung","crypto casino","bitcoin casino"],
+    "DK": ["online casino","casino online","crypto casino","bitcoin casino","best online casino"],
+    "FI": ["online casino","casino online","crypto casino","bitcoin casino","free spins no deposit"],
+    "NO": ["online casino","casino online","crypto casino","bitcoin casino","free spins no deposit"],
+    "SI": ["online casino","casino online","crypto casino","bitcoin casino","no deposit bonus casino"]
 }
 
-GEO_FLAGS = {"AU": "🇦🇺", "CA": "🇨🇦", "NZ": "🇳🇿", "DE": "🇩🇪", "AT": "🇦🇹"}
+GEO_FLAGS = {
+    "AU": "🇦🇺", "CA": "🇨🇦", "NZ": "🇳🇿", "DE": "🇩🇪", "AT": "🇦🇹",
+    "IT": "🇮🇹", "IE": "🇮🇪", "CH": "🇨🇭", "DK": "🇩🇰", "FI": "🇫🇮", "NO": "🇳🇴", "SI": "🇸🇮"
+}
 
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -258,12 +265,6 @@ def get_site_name(domain):
     return ""
 
 
-def is_review_site(url):
-    """Перевіряє чи є сайт рев'юшником по URL"""
-    url_lower = url.lower()
-    return any(kw in url_lower for kw in REVIEW_KEYWORDS)
-
-
 def extract_domain(url):
     if not url or not isinstance(url, str):
         return ""
@@ -407,28 +408,7 @@ def save_history(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def apply_green_formatting(ws, row_indices, spreadsheet):
-    """Підсвічує рядки рев'юшників зеленим"""
-    if not row_indices:
-        return
-    green = {"backgroundColor": {"red": 0.56, "green": 0.93, "blue": 0.56}}
-    requests_batch = []
-    for row_idx in row_indices:
-        requests_batch.append({
-            "repeatCell": {
-                "range": {
-                    "sheetId": ws.id,
-                    "startRowIndex": row_idx,
-                    "endRowIndex": row_idx + 1,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": 15
-                },
-                "cell": {"userEnteredFormat": green},
-                "fields": "userEnteredFormat.backgroundColor"
-            }
-        })
-    if requests_batch:
-        spreadsheet.batch_update({"requests": requests_batch})
+
 
 
 def main():
@@ -578,19 +558,8 @@ def main():
 
     # Записуємо в Google Sheets
     if sheets_rows:
-        existing_rows = len(ws.get_all_values())
         ws.append_rows(sheets_rows, value_input_option="RAW")
         print(f"✅ Записано {len(sheets_rows)} рядків в Google Sheets")
-
-        review_row_indices = []
-        for i, row in enumerate(sheets_rows):
-            url = row[4]
-            if is_review_site(url):
-                review_row_indices.append(existing_rows + i)
-
-        if review_row_indices:
-            apply_green_formatting(ws, review_row_indices, spreadsheet)
-            print(f"✅ Підсвічено {len(review_row_indices)} рев'юшників зеленим")
 
     # Відправка в Slack — тільки нові сайти
     if new_sites:
