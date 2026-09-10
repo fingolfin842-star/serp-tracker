@@ -72,6 +72,20 @@ def get_or_create_sheet(gc, today_str):
     return ws
 
 
+def get_or_create_source_sheet(gc):
+    """Повертає лист 'Джерело' — суцільний накопичувальний лог для трекінгу
+    трафіку (Дата, ГЕО, Ключ, Позиція, URL, Traffic), на відміну від
+    повних вкладок-по-датах. Створюється один раз при першому запуску;
+    далі просто дописується."""
+    spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
+    try:
+        ws = spreadsheet.worksheet("Джерело")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title="Джерело", rows=5000, cols=6)
+        ws.append_row(["Дата", "ГЕО", "Ключ", "Позиція", "URL", "Traffic"])
+    return ws
+
+
 def load_pages_data(gc):
     """Завантажує дані з вкладки Pages"""
     try:
@@ -418,6 +432,7 @@ def main():
     gc = get_sheets_client()
     spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
     ws = get_or_create_sheet(gc, today_str)
+    source_ws = get_or_create_source_sheet(gc)
 
     # Завантажуємо дані
     pages_map = load_pages_data(gc)
@@ -560,6 +575,13 @@ def main():
     if sheets_rows:
         ws.append_rows(sheets_rows, value_input_option="RAW")
         print(f"✅ Записано {len(sheets_rows)} рядків в Google Sheets")
+
+        # Дублюємо в накопичувальний лист "Джерело" — тільки те, що потрібно
+        # для трекінгу трафіку (Дата, ГЕО, Ключ, Позиція, URL, Traffic).
+        # Індекси в sheets_rows: 0=Дата, 1=ГЕО, 2=Ключ, 3=Позиція, 4=URL, 6=Traffic
+        source_rows = [[row[0], row[1], row[2], row[3], row[4], row[6]] for row in sheets_rows]
+        source_ws.append_rows(source_rows, value_input_option="RAW")
+        print(f"✅ Продубльовано {len(source_rows)} рядків в лист 'Джерело'")
 
     # Відправка в Slack — тільки нові сайти
     if new_sites:
