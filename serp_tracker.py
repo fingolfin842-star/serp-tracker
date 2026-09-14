@@ -86,11 +86,55 @@ def get_or_create_source_sheet(gc):
     return ws
 
 
+def clean_source_sheet(source_ws, pages_map):
+    """Одноразово (на кожному запуску) прибирає з листа 'Джерело' застарілі
+    рядки: Traffic < 1000, а також URL з доменами, позначеними
+    'casino brand' у вкладці Pages base. Це стосується лише Джерело/Pages
+    statistic — звичайні вкладки-дати не чіпаються."""
+    all_values = source_ws.get_all_values()
+    if len(all_values) < 2:
+        return
+
+    header, rows = all_values[0], all_values[1:]
+    kept_rows = []
+    removed = 0
+
+    for row in rows:
+        if len(row) < 6:
+            kept_rows.append(row)
+            continue
+
+        url_val = row[4]
+        traffic_str = row[5].strip()
+        try:
+            traffic_val = float(traffic_str) if traffic_str != "" else 0
+        except ValueError:
+            traffic_val = 0
+
+        if traffic_val < 1000:
+            removed += 1
+            continue
+
+        domain = extract_domain(url_val)
+        if pages_map.get(domain, {}).get("type", "") == "casino brand":
+            removed += 1
+            continue
+
+        kept_rows.append(row)
+
+    if removed:
+        source_ws.clear()
+        source_ws.append_row(header)
+        if kept_rows:
+            source_ws.append_rows(kept_rows, value_input_option="RAW")
+        print(f"🧹 Прибрано {removed} застарілих рядків з листа 'Джерело' (traffic<1000 або casino brand)")
+
+
 def load_pages_data(gc):
-    """Завантажує дані з вкладки Pages"""
+    """Завантажує дані з вкладки Pages base"""
     try:
         spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
-        ws = spreadsheet.worksheet("Pages")
+        ws = spreadsheet.worksheet("Pages base")
         rows = ws.get_all_values()
         if not rows:
             return {}
@@ -103,7 +147,7 @@ def load_pages_data(gc):
             manager_col = headers.index("manager")
             type_col = headers.index("type")
         except ValueError as e:
-            print(f"  ⚠️ Колонка не знайдена в Pages: {e}")
+            print(f"  ⚠️ Колонка не знайдена в Pages base: {e}")
             return {}
 
         pages_map = {}
@@ -439,6 +483,9 @@ def main():
     manager_history = load_manager_history(gc, today_str)
     friends_list = load_friends_data(gc)
 
+    # Одноразова ретроактивна чистка Джерело: traffic<1000 та casino brand
+    clean_source_sheet(source_ws, pages_map)
+
     history = load_history()
     previous_dates = sorted(d for d in history.keys() if d < today_str)
     if previous_dates:
@@ -460,6 +507,20 @@ def main():
         for keyword in keywords:
             print(f"  {geo} | {keyword}")
             positions = get_serp(keyword, geo)
+
+            # Не вносимо сайти з Traffic < 1000 нікуди далі по пайплайну
+            # (ні у вкладки-дати, ні в Джерело, ні в перевірку контактів/брендів)
+            filtered_positions = []
+            for pos in positions:
+                if pos.get("is_paa"):
+                    filtered_positions.append(pos)
+                    continue
+                traffic_val = pos.get("traffic") or 0
+                if traffic_val < 1000:
+                    continue
+                filtered_positions.append(pos)
+            positions = filtered_positions
+
             all_results[geo][keyword] = positions
             time.sleep(2)
 
@@ -579,9 +640,18 @@ def main():
         # Дублюємо в накопичувальний лист "Джерело" — тільки те, що потрібно
         # для трекінгу трафіку (Дата, ГЕО, Ключ, Позиція, URL, Traffic).
         # Індекси в sheets_rows: 0=Дата, 1=ГЕО, 2=Ключ, 3=Позиція, 4=URL, 6=Traffic
-        source_rows = [[row[0], row[1], row[2], row[3], row[4], row[6]] for row in sheets_rows]
-        source_ws.append_rows(source_rows, value_input_option="RAW")
-        print(f"✅ Продубльовано {len(source_rows)} рядків в лист 'Джерело'")
+        # "casino brand" (за Pages base) сюди не потрапляє — тільки для Джерело/Pages statistic,
+        # звичайні вкладки-дати (ws) лишаються без цього фільтру.
+        source_rows = []
+        for row in sheets_rows:
+            domain = extract_domain(row[4])
+            if pages_map.get(domain, {}).get("type", "") == "casino brand":
+                continue
+            source_rows.append([row[0], row[1], row[2], row[3], row[4], row[6]])
+
+        if source_rows:
+            source_ws.append_rows(source_rows, value_input_option="RAW")
+            print(f"✅ Продубльовано {len(source_rows)} рядків в лист 'Джерело'")
 
     # Відправка в Slack — тільки нові сайти
     if new_sites:
