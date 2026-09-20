@@ -27,17 +27,17 @@ NAMED_SITES = {
 }
 
 KEYWORDS = {
-    "AU": ["online casino","online casino australia","online casino australia real money","australian online casino","best online casino australia","casino online","best australian online casino","online pokies","online pokies australia","pokies online","online pokies real money","payid pokies","best online pokies australia","australian online pokies","no deposit bonus casino","free spins no deposit","no deposit free spins","online casino no deposit bonus"],
-    "CA": ["online casino","online casino canada","casino en ligne","1$ deposit casino","casino bonus","best casino online","best online casino canada","no deposit bonus casino","no deposit bonus casino canada","casino no deposit bonus","no deposit casino","casino bonus sans dépôt","casino rewards bonus sans dépôt","best online casino","$5 minimum deposit casino canada"],
-    "NZ": ["$1 deposit casino","$1 deposit casino nz","1 dollar deposit casino","online casino nz","online casino","best online casino nz","nz online casino","best online casino","casino online","no deposit bonus casino","deposit $1 get $20 nz","1 deposit casino"],
-    "DE": ["online casino","online casino deutschland","casino online","bestes online casino","beste online casino","casino bonus ohne einzahlung","10 euro bonus ohne einzahlung casino","online casino kostenlos","online casino bonus ohne einzahlung","crypto casino","bitcoin casino","online casino ohne limit"],
-    "AT": ["online casino","online casino österreich","casino online","casino austria","casino online österreich","casino bonus ohne einzahlung","online casino bonus ohne einzahlung","bitcoin casino","crypto casino"],
-    "IT": ["casino non aams","casino online non aams","casino online","bonus senza deposito casino","bonus casino senza deposito","migliori casino online","online casino","roulette casino","casino con bonus senza deposito","casino online italia","siti non aams","casino venezia online"],
+    "AU": ["online casino","online casino australia","online casino australia real money","australian online casino","best online casino australia","casino online","best australian online casino","online pokies","online pokies australia","pokies online","online pokies real money","payid pokies","best online pokies australia","australian online pokies","no deposit bonus casino","free spins no deposit","no deposit free spins","online casino no deposit bonus","poker online"],
+    "CA": ["online casino","online casino canada","casino en ligne","1$ deposit casino","casino bonus","best casino online","best online casino canada","no deposit bonus casino","no deposit bonus casino canada","casino no deposit bonus","no deposit casino","casino bonus sans dépôt","casino rewards bonus sans dépôt","best online casino","$5 minimum deposit casino canada","blackjack casino","poker online","roulette casino"],
+    "NZ": ["$1 deposit casino","$1 deposit casino nz","1 dollar deposit casino","online casino nz","online casino","best online casino nz","nz online casino","best online casino","casino online","no deposit bonus casino","deposit $1 get $20 nz","1 deposit casino","poker online"],
+    "DE": ["online casino","online casino deutschland","casino online","bestes online casino","beste online casino","casino bonus ohne einzahlung","10 euro bonus ohne einzahlung casino","online casino kostenlos","online casino bonus ohne einzahlung","crypto casino","bitcoin casino","online casino ohne limit","roulette casino","poker online"],
+    "AT": ["online casino","online casino österreich","casino online","casino austria","casino online österreich","casino bonus ohne einzahlung","online casino bonus ohne einzahlung","bitcoin casino","crypto casino","poker online"],
+    "IT": ["casino non aams","casino online non aams","casino online","bonus senza deposito casino","bonus casino senza deposito","migliori casino online","online casino","roulette casino","casino con bonus senza deposito","casino online italia","siti non aams","casino venezia online","poker online"],
     "IE": ["online casino","casino online","casino online ireland","no deposit bonus casino","free spins no deposit","best online casino","bitcoin casino","crypto casino"],
     "CH": ["online casino","casino online","bestes online casino","beste online casino","casino bonus ohne einzahlung","crypto casino","bitcoin casino"],
     "DK": ["online casino","casino online","crypto casino","bitcoin casino","best online casino"],
     "FI": ["online casino","casino online","crypto casino","bitcoin casino","free spins no deposit"],
-    "NO": ["online casino","casino online","crypto casino","bitcoin casino","free spins no deposit"],
+    "NO": ["online casino","casino online","crypto casino","bitcoin casino","free spins no deposit","blackjack casino"],
     "SI": ["online casino","casino online","crypto casino","bitcoin casino","no deposit bonus casino"]
 }
 
